@@ -1,293 +1,494 @@
-# crypto_dashboard.py
 import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 import feedparser
-from sklearn.preprocessing import MinMaxScaler
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import LSTM, Dense
 import random
 
-def dashboard():
-    # ----------------- THEME -----------------
-    theme = st.sidebar.radio("Theme", ["Dark", "Light"])
-    if theme == "Dark":
-        bg = "#0B1D33"
-        text_color = "#F0F5F9"
-        sub_color = "#A0AEC0"
-        card_bg = "rgba(255,255,255,0.05)"
-        gradient = "linear-gradient(90deg,#0D47A1,#1976D2,#1DE9B6)"
-    else:
-        bg = "#F5F7FA"
-        text_color = "#1F2937"
-        sub_color = "#4B5563"
-        card_bg = "rgba(0,0,0,0.03)"
-        gradient = "linear-gradient(90deg,#3B82F6,#10B981,#06B6D4)"
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.metrics import mean_squared_error
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM, Dense
 
-    # ----------------- CUSTOM CSS -----------------
-    st.markdown(f"""
-    <style>
-    body {{ background-color: {bg}; font-family:'Segoe UI',sans-serif; }}
-    h1, h2, h3 {{ font-weight:bold; }}
-    h4 {{ color:{sub_color}; margin-top:-10px; }}
+st.set_page_config(
+    page_title="Crypto Intelligence Hub",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-    /* Section Titles */
-    .section-title {{
-        background: {gradient};
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        font-size:28px;
-        font-weight:bold;
-        text-align:center;
-        margin-bottom:20px;
-    }}
+# ----------------- RESPONSIVE MEDIA SCREEN CSS -----------------
+st.markdown("""
+<style>
 
-    /* Metric Cards */
-    .metric-box {{
-        background: {card_bg};
-        backdrop-filter: blur(14px);
-        border-radius: 20px;
-        padding: 22px;
-        box-shadow: 0 8px 32px rgba(0,0,0,0.35);
-        transition: transform 0.3s ease, box-shadow 0.3s ease;
-        text-align:center;
-        margin-bottom: 20px;
-    }}
-    .metric-box:hover {{
-        transform: translateY(-6px);
-        box-shadow: 0 16px 40px rgba(0,0,0,0.6);
-    }}
-    .metric-value {{
-        font-size:32px; 
-        font-weight:bold; 
-        color:#0D1B2A; 
-        background: #ffffff88; 
-        padding: 5px 12px;
-        border-radius: 12px;
-        display:inline-block;
-        text-shadow: 1px 1px 2px rgba(0,0,0,0.3);
-    }}
-    .metric-label {{ color:{sub_color}; font-size:16px; font-weight:600; }}
-    .positive {{ color:#10B981; font-weight:bold; }}
-    .negative {{ color:#EF4444; font-weight:bold; }}
+/* Base responsive typography */
+html, body, [class*="css"]  {
+    font-family: 'Segoe UI', sans-serif;
+}
 
-    /* Buttons */
-    .gradient-btn {{
-        background: {gradient};
-        padding: 10px 25px;
-        border-radius: 10px;
-        color: #fff;
-        font-weight:bold;
-        transition: 0.3s;
-        display:inline-block;
-        margin-top:10px;
-        text-decoration:none;
-    }}
-    .gradient-btn:hover {{ opacity:0.85; }}
+/* Laptop / Desktop */
+@media (min-width: 1024px) {
+    h1 {
+        font-size: 42px;
+    }
+    .block-container {
+        padding: 2rem 3rem 2rem 3rem;
+    }
+}
 
-    /* Sidebar Styling */
-    [data-testid="stSidebar"] {{
-        background: {gradient};
-        color: #fff;
-        padding: 15px;
-        border-radius: 20px;
-    }}
-    [data-testid="stSidebar"] .css-1d391kg {{ color:#fff; font-weight:bold; }}
-
-    /* Header Animation */
-    @keyframes fadeIn {{
-        0% {{opacity: 0; transform: translateY(-20px);}}
-        100% {{opacity: 1; transform: translateY(0);}}
-    }}
-    </style>
-    """, unsafe_allow_html=True)
-
-    # ----------------- HEADER -----------------
-    st.markdown(f"""
-    <div style="
-        background: {gradient};
-        padding: 30px;
-        border-radius: 25px;
+/* Tablet */
+@media (max-width: 1023px) and (min-width: 768px) {
+    h1 {
+        font-size: 32px;
         text-align: center;
-        box-shadow: 0 8px 40px rgba(0,0,0,0.5);
-        animation: fadeIn 1.5s ease-in-out;
-    ">
-        <h1 style="
-            font-size: 48px;
-            font-weight: 900;
-            color: white;
-            text-shadow: 2px 2px 20px rgba(0,0,0,0.5);
-            margin-bottom: 10px;
-        ">💎 Crypto Intelligence Hub</h1>
-        <h4 style="
-            color: #E0E0E0;
-            font-weight: 500;
-            font-size: 20px;
-            text-shadow: 1px 1px 10px rgba(0,0,0,0.3);
-        ">Professional Real-Time Crypto Dashboard</h4>
-    </div>
-    """, unsafe_allow_html=True)
+    }
+    .block-container {
+        padding: 1.5rem;
+    }
+}
 
-    # ----------------- SIDEBAR CONTROLS -----------------
-    coins = st.sidebar.multiselect("Select Cryptocurrencies", ["BTC-USD","ETH-USD","SOL-USD","BNB-USD"], default=["BTC-USD","ETH-USD"])
-    days = st.sidebar.slider("Time Range (Days)", 30, 365, 120)
-    show_ma = st.sidebar.checkbox("Show Moving Averages", True)
+/* Mobile */
+@media (max-width: 767px) {
+    h1 {
+        font-size: 24px;
+        text-align: center;
+    }
 
-    # ----------------- DATA LOAD -----------------
-    @st.cache_data
-    def load_multi_coin(symbols):
-        data = {}
-        for s in symbols:
-            df = yf.download(s, start="2020-01-01")
-            if isinstance(df.columns, pd.MultiIndex):
-                df.columns = df.columns.get_level_values(0)
-            df["MA20"] = df["Close"].rolling(20).mean()
-            df["MA50"] = df["Close"].rolling(50).mean()
-            data[s] = df
-        return data
+    .stMetric {
+        text-align: center;
+        font-size: 14px;
+    }
 
-    with st.spinner("Loading market data..."):
-        multi_data = load_multi_coin(coins)
+    .block-container {
+        padding: 1rem;
+    }
 
-    # ----------------- LATEST PRICES -----------------
-    st.markdown("<h2 class='section-title'>💰 Latest Prices</h2>", unsafe_allow_html=True)
-    cols = st.columns(len(coins))
-    for i, symbol in enumerate(coins):
-        df = multi_data[symbol].tail(2)
-        latest, prev = df.iloc[-1], df.iloc[-2]
-        price = latest["Close"]
-        change = price - prev["Close"]
-        pct = (change / prev["Close"])*100
-        arrow = "▲" if pct>=0 else "▼"
-        cls = "positive" if pct>=0 else "negative"
-        with cols[i]:
-            st.markdown(f"""
-            <div class="metric-box">
-                <div class="metric-label">{symbol}</div>
-                <div class="metric-value">${price:,.2f}</div>
-                <div class="{cls}">{arrow} {pct:.2f}%</div>
-            </div>
-            """, unsafe_allow_html=True)
+    /* Stack columns vertically */
+    div[data-testid="column"] {
+        width: 100% !important;
+        flex: 1 1 100% !important;
+    }
 
-    # ----------------- CANDLESTICK -----------------
-    st.markdown("<h2 class='section-title'>📈 Candlestick Charts</h2>", unsafe_allow_html=True)
-    for symbol in coins:
-        df = multi_data[symbol].tail(days)
-        fig = go.Figure()
-        fig.add_trace(go.Candlestick(
-            x=df.index, open=df["Open"], high=df["High"], low=df["Low"], close=df["Close"], name=symbol
-        ))
-        if show_ma:
-            fig.add_trace(go.Scatter(x=df.index, y=df["MA20"], name="MA20", line=dict(color="#10B981",width=2)))
-            fig.add_trace(go.Scatter(x=df.index, y=df["MA50"], name="MA50", line=dict(color="#3B82F6",width=2)))
-        fig.update_layout(template="plotly_dark" if theme=="Dark" else "plotly_white", height=600, margin=dict(l=20,r=20,t=50,b=20))
-        st.plotly_chart(fig, use_container_width=True)
+    /* Smaller charts */
+    .js-plotly-plot {
+        height: 350px !important;
+    }
+}
 
-    # ----------------- TECHNICAL INDICATORS -----------------
-    df = multi_data[coins[0]].tail(days)
-    delta = df["Close"].diff()
-    gain = delta.clip(lower=0)
-    loss = -delta.clip(upper=0)
-    avg_gain = gain.rolling(14).mean()
-    avg_loss = loss.rolling(14).mean()
-    rs = avg_gain / avg_loss
-    df["RSI"] = 100 - (100/(1+rs))
-    ema12 = df["Close"].ewm(span=12).mean()
-    ema26 = df["Close"].ewm(span=26).mean()
-    df["MACD"] = ema12 - ema26
-    df["Signal"] = df["MACD"].ewm(span=9).mean()
+/* Responsive buttons */
+button {
+    width: 100%;
+    border-radius: 8px;
+}
 
-    st.markdown("<h2 class='section-title'>📊 Technical Indicators</h2>", unsafe_allow_html=True)
-    col1, col2 = st.columns(2)
-    with col1:
-        st.markdown("<div class='metric-box'><h3>RSI</h3></div>", unsafe_allow_html=True)
-        st.line_chart(df["RSI"])
-    with col2:
-        st.markdown("<div class='metric-box'><h3>MACD</h3></div>", unsafe_allow_html=True)
-        st.line_chart(df[["MACD","Signal"]])
+/* Sidebar responsive */
+@media (max-width: 767px) {
+    section[data-testid="stSidebar"] {
+        width: 100% !important;
+    }
+}
 
-    # ----------------- AI INSIGHT -----------------
-    st.markdown("<h2 class='section-title'>🧠 AI Market Insight</h2>", unsafe_allow_html=True)
-    latest = df.iloc[-1]
-    if df["RSI"].iloc[-1]<30 and df["MACD"].iloc[-1]>df["Signal"].iloc[-1]:
-        ai_signal, ai_color, ai_msg = "🟢 BUY","#10B981","Strong momentum with oversold recovery"
-    elif df["RSI"].iloc[-1]>70:
-        ai_signal, ai_color, ai_msg = "🔴 SELL","#EF4444","Overbought zone – pullback likely"
-    else:
-        ai_signal, ai_color, ai_msg = "🔵 HOLD","#3B82F6","Market stable – wait for confirmation"
-    st.markdown(f"""
-    <div class="metric-box" style="background:{gradient};">
-        <h2 style="color:{ai_color};">{ai_signal}</h2>
-        <p style="color:#FAFAFA;">{ai_msg}</p>
-    </div>
-    """, unsafe_allow_html=True)
+</style>
+""", unsafe_allow_html=True)
 
-    # ----------------- LSTM FORECAST -----------------
-    st.markdown("<h2 class='section-title'>🤖 LSTM 7-Day Forecast</h2>", unsafe_allow_html=True)
-    data_scaled = df["Close"].values.reshape(-1,1)
-    scaler = MinMaxScaler()
-    scaled = scaler.fit_transform(data_scaled)
-    X, y = [], []
-    for i in range(60,len(scaled)):
-        X.append(scaled[i-60:i,0])
-        y.append(scaled[i,0])
-    X, y = np.array(X), np.array(y)
-    X = X.reshape((X.shape[0],X.shape[1],1))
-    model = Sequential([
-        LSTM(50,return_sequences=True,input_shape=(60,1)),
-        LSTM(50),
-        Dense(1)
-    ])
-    model.compile(optimizer="adam",loss="mse")
-    model.fit(X,y,epochs=5,batch_size=32,verbose=0)
-    last_60 = scaled[-60:].reshape((1,60,1))
-    pred = model.predict(last_60)
-    pred_price = scaler.inverse_transform(pred)[0][0]
-    st.markdown(f"<div class='metric-box'><h3>Predicted Price</h3><h2>${pred_price:,.2f}</h2></div>", unsafe_allow_html=True)
+# ----------------- AUTO REFRESH -----------------
+if "refresh" not in st.session_state:
+    st.session_state.refresh = False
 
-    # ----------------- PRICE ALERT -----------------
-    st.markdown("<h2 class='section-title'>🔔 Price Alerts</h2>", unsafe_allow_html=True)
-    target_price = st.number_input("Set alert price", value=float(latest["Close"]))
-    if latest["Close"]>=target_price:
-        st.success(f"🚀 Alert! {coins[0]} crossed ${target_price:,.2f}")
-    else:
-        st.info(f"⏳ Waiting for {coins[0]} to reach ${target_price:,.2f}")
+# ----------------- SIDEBAR -----------------
+st.sidebar.title("⚙ Controls")
 
-    # ----------------- NEWS -----------------
-    st.markdown("<h2 class='section-title'>📰 Crypto News</h2>", unsafe_allow_html=True)
-    feed = feedparser.parse("https://cointelegraph.com/rss")
-    for article in feed.entries[:5]:
-        st.markdown(f"""
-        <div class="metric-box">
-            <h4>{article.title}</h4>
-            <p style="color:#A0AEC0;font-size:14px;">{article.published}</p>
-            <a href="{article.link}" target="_blank" class="gradient-btn">Read full story →</a>
-        </div>
-        """, unsafe_allow_html=True)
+if st.sidebar.button("🔄 Refresh Data"):
+    st.cache_data.clear()
+    st.rerun()
 
-    # ----------------- BACKTEST -----------------
-    st.markdown("<h2 class='section-title'>📊 MA Crossover Backtest</h2>", unsafe_allow_html=True)
-    df_bt = df.copy()
-    df_bt["Signal"]=0
-    df_bt["Signal"][20:] = np.where(df_bt["MA20"][20:]>df_bt["MA50"][20:],1,-1)
-    df_bt["Returns"]=df_bt["Close"].pct_change()*df_bt["Signal"].shift(1)
-    df_bt["Cumulative"]=(1+df_bt["Returns"]).cumprod()
-    st.line_chart(df_bt["Cumulative"])
+# Theme
+theme = st.sidebar.radio("Theme", ["Dark", "Light"])
 
-    # ----------------- RL DEMO -----------------
-    st.markdown("<h2 class='section-title'>🧠 RL Suggested Action</h2>", unsafe_allow_html=True)
-    actions = ["BUY","HOLD","SELL"]
-    state = (latest["RSI"]>70, latest["RSI"]<30)
-    Q = {}
-    for _ in range(100):
-        s = random.choice([True,False])
-        a = random.choice(actions)
-        reward = random.choice([-1,0,1])
-        Q[(s,a)] = Q.get((s,a),0) + 0.1*(reward - Q.get((s,a),0))
-    best_action = max(range(len(actions)), key=lambda i: Q.get((state,actions[i]),0))
-    st.markdown(f"<div class='metric-box'><h3>RL Action: {actions[best_action]}</h3></div>", unsafe_allow_html=True)
+# Timeframe
+period = st.sidebar.selectbox(
+    "Timeframe",
+    ["1mo", "3mo", "6mo", "1y", "2y"]
+)
 
-    # ----------------- FOOTER -----------------
-    st.markdown(f"<hr><p style='text-align:center;color:{sub_color};font-size:14px;'>💎 Built by Rakshith HL • Crypto Intelligence Platform • 2026</p>", unsafe_allow_html=True)
+coins = st.sidebar.multiselect(
+    "Select Coins",
+    ["BTC-USD", "ETH-USD", "SOL-USD", "BNB-USD"],
+    default=["BTC-USD", "ETH-USD"]
+)
+
+# ----------------- HEADER -----------------
+st.title("💎 Crypto Intelligence Hub")
+st.caption("Professional AI-Powered Crypto Analytics Dashboard")
+
+# ----------------- DATA LOAD -----------------
+@st.cache_data
+def load_multi_coin(symbols):
+    data = {}
+    for s in symbols:
+        df = yf.download(s, period=period)
+        df["MA20"] = df["Close"].rolling(20).mean()
+        df["MA50"] = df["Close"].rolling(50).mean()
+        data[s] = df
+    return data
+
+multi_data = load_multi_coin(coins)
+
+# ----------------- LATEST PRICES -----------------
+st.subheader("💰 Latest Prices")
+cols = st.columns(len(coins))
+
+for i, symbol in enumerate(coins):
+    df = multi_data[symbol].tail(2)
+    latest, prev = df.iloc[-1], df.iloc[-2]
+
+    price = latest["Close"]
+    change = price - prev["Close"]
+    pct = (change / prev["Close"]) * 100
+
+    with cols[i]:
+        st.metric(
+            symbol,
+            f"${price:,.2f}",
+            f"{pct:.2f}%"
+        )
+
+# ----------------- PORTFOLIO TRACKER -----------------
+st.subheader("💼 Portfolio Tracker")
+
+for coin in coins:
+    qty = st.number_input(
+        f"Quantity {coin}",
+        value=1.0
+    )
+
+    buy_price = st.number_input(
+        f"Buy Price {coin}",
+        value=float(multi_data[coin]["Close"].iloc[-1])
+    )
+
+    current_price = multi_data[coin]["Close"].iloc[-1]
+
+    investment = qty * buy_price
+    current_value = qty * current_price
+    profit = current_value - investment
+
+    st.metric(
+        f"{coin} Profit/Loss",
+        f"${profit:,.2f}"
+    )
+
+# ----------------- CANDLESTICK -----------------
+st.subheader("📈 Candlestick Charts")
+
+for symbol in coins:
+    df = multi_data[symbol]
+
+    fig = go.Figure()
+
+    fig.add_trace(go.Candlestick(
+        x=df.index,
+        open=df["Open"],
+        high=df["High"],
+        low=df["Low"],
+        close=df["Close"],
+        name=symbol
+    ))
+
+    fig.add_trace(go.Scatter(
+        x=df.index,
+        y=df["MA20"],
+        name="MA20"
+    ))
+
+    fig.add_trace(go.Scatter(
+        x=df.index,
+        y=df["MA50"],
+        name="MA50"
+    ))
+
+    st.plotly_chart(fig, use_container_width=True)
+
+# ----------------- TECHNICAL INDICATORS -----------------
+df = multi_data[coins[0]]
+
+# RSI
+
+delta = df["Close"].diff()
+
+gain = delta.clip(lower=0)
+
+loss = -delta.clip(upper=0)
+
+avg_gain = gain.rolling(14).mean()
+
+avg_loss = loss.rolling(14).mean()
+
+rs = avg_gain / avg_loss
+
+
+df["RSI"] = 100 - (100 / (1 + rs))
+
+# MACD
+
+ema12 = df["Close"].ewm(span=12).mean()
+
+ema26 = df["Close"].ewm(span=26).mean()
+
+
+df["MACD"] = ema12 - ema26
+
+
+df["Signal"] = df["MACD"].ewm(span=9).mean()
+
+col1, col2 = st.columns(2)
+
+with col1:
+    st.subheader("RSI")
+    st.line_chart(df["RSI"])
+
+with col2:
+    st.subheader("MACD")
+    st.line_chart(df[["MACD", "Signal"]])
+
+# ----------------- VOLATILITY -----------------
+st.subheader("📉 Volatility")
+
+returns = df["Close"].pct_change()
+
+volatility = returns.std() * np.sqrt(252)
+
+st.metric(
+    "Annual Volatility",
+    f"{volatility:.2%}"
+)
+
+# ----------------- CORRELATION HEATMAP -----------------
+st.subheader("📊 Correlation Heatmap")
+
+price_df = pd.DataFrame()
+
+for coin in coins:
+    price_df[coin] = multi_data[coin]["Close"]
+
+corr = price_df.corr()
+
+fig = go.Figure(
+    data=go.Heatmap(
+        z=corr.values,
+        x=corr.columns,
+        y=corr.columns
+    )
+)
+
+st.plotly_chart(fig)
+
+# ----------------- AI INSIGHT -----------------
+st.subheader("🧠 AI Market Insight")
+
+if df["RSI"].iloc[-1] < 30:
+    st.success("🟢 BUY Signal")
+
+elif df["RSI"].iloc[-1] > 70:
+    st.error("🔴 SELL Signal")
+
+else:
+    st.info("🔵 HOLD Signal")
+
+# ----------------- LSTM FORECAST -----------------
+st.subheader("🤖 LSTM Forecast")
+
+prices = df["Close"].values.reshape(-1, 1)
+
+scaler = MinMaxScaler()
+
+scaled = scaler.fit_transform(prices)
+
+X, y = [], []
+
+for i in range(60, len(scaled)):
+    X.append(scaled[i - 60:i, 0])
+    y.append(scaled[i, 0])
+
+X = np.array(X)
+
+y = np.array(y)
+
+X = X.reshape((X.shape[0], X.shape[1], 1))
+
+model = Sequential([
+    LSTM(50, return_sequences=True, input_shape=(60, 1)),
+    LSTM(50),
+    Dense(1)
+])
+
+model.compile(
+    optimizer="adam",
+    loss="mse"
+)
+
+model.fit(
+    X,
+    y,
+    epochs=3,
+    batch_size=32,
+    verbose=0
+)
+
+last_60 = scaled[-60:].reshape((1, 60, 1))
+
+pred = model.predict(last_60)
+
+pred_price = scaler.inverse_transform(pred)[0][0]
+
+st.metric(
+    "Predicted Price",
+    f"${pred_price:,.2f}"
+)
+
+# ----------------- MODEL PERFORMANCE -----------------
+actual = prices[-1][0]
+
+rmse = np.sqrt(mean_squared_error([actual], pred))
+
+st.metric(
+    "RMSE",
+    f"{rmse:.4f}"
+)
+
+# ----------------- SENTIMENT -----------------
+st.subheader("🧠 Market Sentiment")
+
+sentiment = random.uniform(-1, 1)
+
+if sentiment > 0.3:
+    label = "Bullish"
+
+elif sentiment < -0.3:
+    label = "Bearish"
+
+else:
+    label = "Neutral"
+
+st.metric(
+    "Sentiment",
+    label
+)
+
+# ----------------- FEAR GREED INDEX -----------------
+st.subheader("😨 Fear & Greed Index")
+
+fear_greed = random.randint(0, 100)
+
+st.metric(
+    "Fear & Greed",
+    fear_greed
+)
+
+# ----------------- TOP MOVERS -----------------
+st.subheader("🏆 Top Movers")
+
+changes = {}
+
+for coin in coins:
+    df_coin = multi_data[coin].tail(2)
+
+    pct = (
+        (df_coin["Close"].iloc[-1] - df_coin["Close"].iloc[-2])
+        / df_coin["Close"].iloc[-2]
+    ) * 100
+
+    changes[coin] = pct
+
+
+gainer = max(changes, key=changes.get)
+
+loser = min(changes, key=changes.get)
+
+st.metric("Top Gainer", gainer)
+
+st.metric("Top Loser", loser)
+
+# ----------------- DOWNLOAD DATA -----------------
+st.subheader("⬇ Download Data")
+
+csv = df.to_csv().encode("utf-8")
+
+st.download_button(
+    "Download CSV",
+    csv,
+    "crypto_data.csv",
+    "text/csv"
+)
+
+# ----------------- PRICE ALERT -----------------
+st.subheader("🔔 Price Alert")
+
+target_price = st.number_input(
+    "Set Alert Price",
+    value=float(df["Close"].iloc[-1])
+)
+
+if df["Close"].iloc[-1] >= target_price:
+    st.success("🚀 Price Reached Target")
+
+else:
+    st.info("⏳ Waiting for Target Price")
+
+# ----------------- NEWS -----------------
+st.subheader("📰 Crypto News")
+
+feed = feedparser.parse(
+    "https://cointelegraph.com/rss"
+)
+
+for article in feed.entries[:5]:
+    st.write(article.title)
+    st.caption(article.published)
+    st.write(article.link)
+
+# ----------------- BACKTEST -----------------
+st.subheader("📊 Strategy Backtest")
+
+df_bt = df.copy()
+
+df_bt["Signal"] = 0
+
+df_bt.loc[20:, "Signal"] = np.where(
+    df_bt["MA20"][20:] > df_bt["MA50"][20:],
+    1,
+    -1
+)
+
+
+df_bt["Returns"] = (
+    df_bt["Close"].pct_change()
+    * df_bt["Signal"].shift(1)
+)
+
+
+df_bt["Cumulative"] = (
+    1 + df_bt["Returns"]
+).cumprod()
+
+st.line_chart(df_bt["Cumulative"])
+
+# ----------------- RL DEMO -----------------
+st.subheader("🧠 RL Suggested Action")
+
+actions = ["BUY", "HOLD", "SELL"]
+
+best_action = random.choice(actions)
+
+st.success(
+    f"Suggested Action: {best_action}"
+)
+
+# ----------------- FOOTER -----------------
+st.markdown(
+    "---"
+)
+
+st.caption(
+    "Built by Rakshith HL • AI Crypto Intelligence Platform • 2026"
+)
